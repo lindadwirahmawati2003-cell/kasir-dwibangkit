@@ -26,10 +26,12 @@ ID_LAPORAN = "1KA5qK57aFiLkPIuFRbZD4g5PU_5nly-19Dup1DtdkqE"
 st.set_page_config(page_title="KASIR DWI BANGKIT", layout="wide")
 st.title("🏪 Kasir Dwi Bangkit Cloud")
 
+# Koneksi ke Sheets
 sh_barang = koneksi_sheet(ID_BARANG)
 sh_member = koneksi_sheet(ID_MEMBER)
 
 if sh_barang and sh_member:
+    # Membaca data barang dan member
     df_barang = pd.DataFrame(sh_barang.get_all_records())
     df_member = pd.DataFrame(sh_member.get_all_records())
     
@@ -40,49 +42,50 @@ if sh_barang and sh_member:
 
     with col1:
         st.subheader("🛒 Input Barang")
+        # List Member
         member_list = ["Umum"]
         if not df_member.empty and 'Nama Member' in df_member.columns:
             member_list += df_member['Nama Member'].tolist()
         
         nama_member = st.selectbox("Pilih Member", member_list)
-        barcode = st.text_input("Scan Barcode", key="barcode_input")
+        barcode = st.text_input("Scan Barcode", key="barcode_scan")
         
         if barcode:
-            # Cari barang berdasarkan Barcode
             hasil = df_barang[df_barang['Barcode'].astype(str) == barcode]
             
             if not hasil.empty:
                 item = hasil.iloc[0]
                 st.success(f"📦 {item['Nama']}")
                 
-                # --- FITUR PILIH SATUAN & HARGA ---
+                # Pilihan Satuan
                 opsi_satuan = ["Ecer/Pcs", "Grosir", "Dus"]
-                pilihan_satuan = st.radio("Pilih Jenis Pembelian:", opsi_satuan, horizontal=True)
+                pilihan_satuan = st.radio("Pilih Jenis:", opsi_satuan, horizontal=True)
                 
-                # Logika Penentuan Harga
+                # Tentukan Harga berdasarkan pilihan
                 if pilihan_satuan == "Ecer/Pcs":
-                    # Jika member, pakai harga Member, jika tidak pakai Ecer
-                    harga_final = item['Member'] if nama_member != "Umum" else item['Ecer']
+                    harga_raw = item['Member'] if nama_member != "Umum" else item['Ecer']
                 elif pilihan_satuan == "Grosir":
-                    harga_final = item['Grosir']
+                    harga_raw = item['Grosir']
                 else: # Dus
-                    harga_final = item['Dus']
+                    harga_raw = item['Dus']
                 
-                st.info(f"Harga per {pilihan_satuan}: **Rp {harga_final:,.0f}**")
+                # Konversi harga ke integer biasa agar tidak error saat simpan
+                harga_final = int(harga_raw)
                 
-                qty = st.number_input("Jumlah yang dibeli", min_value=1, value=1)
+                st.info(f"Harga: **Rp {harga_final:,.0f}**")
+                qty = st.number_input("Jumlah", min_value=1, value=1)
                 
-                if st.button("➕ Tambahkan"):
+                if st.button("➕ Tambah"):
                     st.session_state.keranjang.append({
-                        "Nama": item['Nama'],
+                        "Nama": str(item['Nama']),
                         "Satuan": pilihan_satuan,
                         "Harga": harga_final,
-                        "Qty": qty,
-                        "Total": harga_final * qty
+                        "Qty": int(qty),
+                        "Total": int(harga_final * qty)
                     })
                     st.rerun()
             else:
-                st.error("Barcode tidak terdaftar!")
+                st.error("Barcode tidak ada di stok!")
 
     with col2:
         st.subheader("📋 Keranjang")
@@ -90,30 +93,42 @@ if sh_barang and sh_member:
             df_k = pd.DataFrame(st.session_state.keranjang)
             st.table(df_k[["Nama", "Satuan", "Harga", "Qty", "Total"]])
             
-            total_akhir = df_k['Total'].sum()
-            st.header(f"TOTAL: Rp {total_akhir:,.0f}")
+            total_bayar = int(df_k['Total'].sum())
+            st.header(f"TOTAL: Rp {total_bayar:,.0f}")
             
             if st.button("💾 SIMPAN TRANSAKSI"):
                 try:
                     sh_lap = koneksi_sheet(ID_LAPORAN)
                     waktu = datetime.now().strftime("%d/%m/%Y %H:%M")
+                    
                     for r in st.session_state.keranjang:
-                        # Mengirim data ke laporan: Tgl, Member, Nama, Satuan, Qty, Harga, Total
-                        sh_lap.append_row([waktu, nama_member, r['Nama'], r['Satuan'], r['Qty'], r['Harga'], r['Total']])
+                        # Mengirim data sebagai list teks/angka biasa agar Google Sheets menerima
+                        data_baris = [
+                            str(waktu), 
+                            str(nama_member), 
+                            str(r['Nama']), 
+                            str(r['Satuan']), 
+                            int(r['Qty']), 
+                            int(r['Harga']), 
+                            int(r['Total'])
+                        ]
+                        sh_lap.append_row(data_baris)
                     
                     st.balloons()
-                    st.success("Berhasil disimpan ke Google Sheets!")
+                    st.success("Transaksi Berhasil Disimpan!")
                     st.session_state.keranjang = []
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Gagal menyimpan: {e}")
+                    st.error(f"Gagal Simpan: {e}")
 
-            if st.button("🗑️ Hapus Semua"):
+            if st.button("🗑️ Kosongkan"):
                 st.session_state.keranjang = []
                 st.rerun()
         else:
-            st.info("Belum ada barang di keranjang.")
+            st.info("Keranjang kosong.")
 
     st.divider()
-    with st.expander("🔍 Lihat Stok Gudang"):
+    with st.expander("🔍 Stok Gudang"):
         st.dataframe(df_barang)
+else:
+    st.warning("Menghubungkan ke Google Sheets...")
