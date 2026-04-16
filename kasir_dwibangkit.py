@@ -18,6 +18,7 @@ def koneksi_sheet(sheet_id):
     except:
         return None
 
+# ID Google Sheets Linda
 ID_BARANG = "1qf8KmurJi8CbVmwsbRSDCWxir_Ejw2s9y9vGZTNmxAg"
 ID_MEMBER = "1mMbvhMO3uQAjktAPeZ-G_s5IWBVkcuxg8YgPpSQjIgo"
 ID_LAPORAN = "1KA5qK57aFiLkPIuFRbZD4g5PU_5nly-19Dup1DtdkqE"
@@ -29,6 +30,7 @@ def cetak_halaman():
 
 st.title("🏪 Kasir Dwi Bangkit Cloud")
 
+# --- AMBIL DATA (CACHE 1 MENIT) ---
 @st.cache_data(ttl=60)
 def ambil_data(sheet_id):
     sh = koneksi_sheet(sheet_id)
@@ -44,66 +46,62 @@ if 'keranjang' not in st.session_state:
 if 'nota_siap' not in st.session_state:
     st.session_state.nota_siap = False
 
+# --- BAGIAN ATAS: TRANSAKSI ---
 col1, col2 = st.columns([1, 1.2])
 
 with col1:
     st.subheader("👤 Pelanggan")
     status = st.radio("Status:", ["Umum", "Member Terdaftar", "Daftar Baru"], horizontal=True)
     nama_p = "Umum"
-    tipe_harga_otomatis = "Ecer" # Default untuk Umum
+    tipe_harga_otomatis = "Ecer" 
     
     if status == "Member Terdaftar" and not df_member.empty:
         col_nm = df_member.columns[0]
         nama_p = st.selectbox("Cari Member:", df_member[col_nm].tolist())
-        tipe_harga_otomatis = "Member" # Otomatis Member
+        tipe_harga_otomatis = "Member" 
     elif status == "Daftar Baru":
         n_in = st.text_input("Nama")
         w_in = st.text_input("WA")
         if st.button("Daftar"):
-            koneksi_sheet(ID_MEMBER).append_row([n_in, w_in])
-            st.success("Berhasil!")
-            st.cache_data.clear()
-            st.rerun()
+            sh_m = koneksi_sheet(ID_MEMBER)
+            if sh_m:
+                sh_m.append_row([n_in, w_in])
+                st.success("Berhasil!")
+                st.cache_data.clear()
+                st.rerun()
         nama_p = n_in if n_in else "Umum"
 
     st.divider()
     st.subheader("🛒 Scan Barang")
     bc = st.text_input("Scan Barcode", key="scan")
     if bc:
-        col_bc = df_barang.columns[0]
-        hasil = df_barang[df_barang[col_bc].astype(str) == bc]
+        col_bc = df_barang.columns[0] if not df_barang.empty else "Barcode"
+        hasil = df_barang[df_barang[col_bc].astype(str) == bc] if not df_barang.empty else pd.DataFrame()
+        
         if not hasil.empty:
             item = hasil.iloc[0]
             st.success(f"✅ {item['Nama']}")
             
-            # Pilihan Satuan: Jika Dus diklik, harga dus berlaku untuk semua.
-            # Jika tidak, maka mengikuti tipe_harga_otomatis (Member/Ecer)
             opsi_satuan = [tipe_harga_otomatis, "Dus"]
             sat = st.radio("Pilih Satuan:", opsi_satuan, horizontal=True)
             
-            # Ambil Nilai Harga dari Sheet
             hrg = item[sat]
-            
-            # Bersihkan format Rp jika ada
             if isinstance(hrg, str):
-                hrg_fix = int(hrg.replace('Rp', '').replace(',', '').split('.')[0])
+                hrg_fix = int(hrg.replace('Rp', '').replace(',', '').replace('.', '').split(',')[0])
             else:
                 hrg_fix = int(hrg)
 
             st.info(f"Harga {sat}: **Rp {hrg_fix:,.0f}**")
-            qty = st.number_input("Qty", min_value=1, value=1)
+            qty = st.number_input("Jumlah", min_value=1, value=1)
             
-            if st.button("➕ Tambah ke Keranjang"):
+            if st.button("➕ Tambah"):
                 st.session_state.keranjang.append({
-                    "Nama": item['Nama'], 
-                    "Satuan": sat, 
-                    "Harga": hrg_fix, 
-                    "Qty": int(qty), 
-                    "Total": int(hrg_fix * qty)
+                    "Nama": item['Nama'], "Satuan": sat, 
+                    "Harga": hrg_fix, "Qty": int(qty), "Total": int(hrg_fix * qty)
                 })
                 st.rerun()
         else:
-            st.error("Barcode tidak ditemukan!")
+            st.error("Barcode tidak ditemukan! Silakan cek daftar stok di bawah.")
 
 with col2:
     st.subheader("📋 Keranjang")
@@ -128,7 +126,7 @@ with col2:
         st.session_state.keranjang = []
         st.rerun()
 
-# --- MODAL NOTA ---
+# --- NOTA (MUNCUL JIKA SUDAH SIMPAN) ---
 if st.session_state.nota_siap:
     st.divider()
     nota = st.session_state.nota_siap
@@ -139,11 +137,18 @@ if st.session_state.nota_siap:
     """
     for i in nota['item']:
         nota_html += f"{i['Nama']} ({i['Satuan']})<br>{i['Qty']} x {i['Harga']:,} = {i['Total']:,}<br>"
-    
     nota_html += f"---<br><strong>TOTAL: Rp {nota['total']:,}</strong><br>---<br><center>Terima Kasih</center></div>"
     
     st.markdown(nota_html, unsafe_allow_html=True)
     if st.button("🖨️ Cetak Nota"): cetak_halaman()
-    if st.button("❌ Tutup"): 
+    if st.button("❌ Tutup Nota"): 
         st.session_state.nota_siap = False
         st.rerun()
+
+# --- BAGIAN BAWAH: STOK BARANG (SELALU MUNCUL) ---
+st.divider()
+st.subheader("🔍 Cek Stok Gudang")
+if not df_barang.empty:
+    st.dataframe(df_barang, use_container_width=True)
+else:
+    st.warning("Data stok tidak terbaca. Periksa koneksi Google Sheets.")
